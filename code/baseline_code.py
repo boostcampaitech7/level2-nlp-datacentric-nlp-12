@@ -1,103 +1,53 @@
 import os
 import random
-import numpy as np
-import pandas as pd
-from tqdm import tqdm
-
-import torch
-from torch.utils.data import Dataset
 
 import evaluate
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
-from transformers import DataCollatorWithPadding
-from transformers import TrainingArguments, Trainer
-
+import numpy as np
+import pandas as pd
+import torch
+from bert_dataset import BERTDataset
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
+from transformers import (
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+    DataCollatorWithPadding,
+    Trainer,
+    set_seed,
+)
+from utils import check_git_status, create_experiment_dir, get_arguments, save_args
 
-SEED = 456
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-torch.cuda.manual_seed(SEED)
-torch.cuda.manual_seed_all(SEED)
+commit_id = check_git_status()
+experiment_dir = create_experiment_dir(experiment_type="train")
+model_args, data_args, training_args, json_args = get_arguments(experiment_dir)
 
-DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-DEVICE
+filename = data_args.dataset_name.split(".")[-2].split("/")[-1]
+set_seed(seed=training_args.seed)
+DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-BASE_DIR = os.getcwd()
-DATA_DIR = os.path.join(BASE_DIR, '../data')
-OUTPUT_DIR = os.path.join(BASE_DIR, '../output')
+tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
+model = AutoModelForSequenceClassification.from_pretrained(
+    model_args.model_name_or_path, num_labels=7
+).to(DEVICE)
 
-model_name = 'klue/bert-base'
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=7).to(DEVICE)
-
-data = pd.read_csv(os.path.join(DATA_DIR, 'train.csv'))
-dataset_train, dataset_valid = train_test_split(data, test_size=0.3, random_state=SEED)
-
-class BERTDataset(Dataset):
-    def __init__(self, data, tokenizer):
-        input_texts = data['text']
-        targets = data['target']
-        self.inputs = []; self.labels = []
-        for text, label in zip(input_texts, targets):
-            tokenized_input = tokenizer(text, padding='max_length', truncation=True, return_tensors='pt')
-            self.inputs.append(tokenized_input)
-            self.labels.append(torch.tensor(label))
-
-    def __getitem__(self, idx):
-        return {
-            'input_ids': self.inputs[idx]['input_ids'].squeeze(0),
-            'attention_mask': self.inputs[idx]['attention_mask'].squeeze(0),
-            'labels': self.labels[idx].squeeze(0)
-        }
-
-    def __len__(self):
-        return len(self.labels)
-
+data = pd.read_csv(data_args.dataset_name)
+dataset_train, dataset_valid = train_test_split(
+    data, test_size=training_args.test_size, random_state=training_args.seed
+)
 
 data_train = BERTDataset(dataset_train, tokenizer)
 data_valid = BERTDataset(dataset_valid, tokenizer)
 
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-f1 = evaluate.load('f1')
+f1 = evaluate.load("f1")
+
+
 def compute_metrics(eval_pred):
     predictions, labels = eval_pred
     predictions = np.argmax(predictions, axis=1)
-    return f1.compute(predictions=predictions, references=labels, average='macro')
+    return f1.compute(predictions=predictions, references=labels, average="macro")
 
-
-### for wandb setting
-#os.environ['WANDB_DISABLED'] = 'true'
-
-training_args = TrainingArguments(
-    output_dir=OUTPUT_DIR,
-    overwrite_output_dir=True,
-    do_train=True,
-    do_eval=True,
-    do_predict=True,
-    logging_strategy='steps',
-    eval_strategy='steps',
-    save_strategy='steps',
-    logging_steps=100,
-    eval_steps=100,
-    save_steps=100,
-    save_total_limit=2,
-    learning_rate= 2e-05,
-    adam_beta1 = 0.9,
-    adam_beta2 = 0.999,
-    adam_epsilon=1e-08,
-    weight_decay=0.01,
-    lr_scheduler_type='linear',
-    per_device_train_batch_size=32,
-    per_device_eval_batch_size=32,
-    num_train_epochs=2,
-    load_best_model_at_end=True,
-    metric_for_best_model='eval_f1',
-    greater_is_better=True,
-    seed=SEED
-)
 
 trainer = Trainer(
     model=model,
@@ -108,19 +58,32 @@ trainer = Trainer(
     compute_metrics=compute_metrics,
 )
 
-trainer.train()
 
-dataset_test = pd.read_csv(os.path.join(DATA_DIR, 'test.csv'))
+if training_args.do_train:
+    trainer.train()
 
-model.eval()
-preds = []
+if training_args.do_eval:
+    dataset_test = pd.read_csv(
+        os.path.join(training_args.output_dir, f"{filename}'.csv'")
+    )
+    model.eval()
 
-for idx, sample in tqdm(dataset_test.iterrows(), total=len(dataset_test), desc="Evaluating"):
-    inputs = tokenizer(sample['text'], return_tensors="pt").to(DEVICE)
-    with torch.no_grad():
-        logits = model(**inputs).logits
-        pred = torch.argmax(torch.nn.Softmax(dim=1)(logits), dim=1).cpu().numpy()
-        preds.extend(pred)
+if training_args.do_predict:
+    preds = []
 
-dataset_test['target'] = preds
-dataset_test.to_csv(os.path.join(BASE_DIR, 'output.csv'), index=False)
+    for idx, sample in tqdm(
+        dataset_test.iterrows(), total=len(dataset_test), desc="Evaluating"
+    ):
+        inputs = tokenizer(sample["text"], return_tensors="pt").to(DEVICE)
+        with torch.no_grad():
+            logits = model(**inputs).logits
+            pred = torch.argmax(torch.nn.Softmax(dim=1)(logits), dim=1).cpu().numpy()
+            preds.extend(pred)
+
+    dataset_test["target"] = preds
+    dataset_test.to_csv(
+        os.path.join(training_args.output_dir, f"{filename}_output.csv"), index=False
+    )
+
+if training_args.do_train or training_args.do_eval or training_args.do_predict:
+    save_args(json_args, experiment_dir, commit_id)
