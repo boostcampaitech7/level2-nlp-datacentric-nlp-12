@@ -69,9 +69,10 @@ if training_args.do_train:
     trainer.train()
 
 if training_args.do_eval:
-    model.eval()
+    trainer.evaluate()
 
 if training_args.do_predict:
+    model.eval()
     preds = []
 
     for idx, sample in tqdm(
