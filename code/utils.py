@@ -4,6 +4,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 import git
+from arguments import DataTrainingArguments, ModelArguments
 from transformers import HfArgumentParser, TrainingArguments
 
 

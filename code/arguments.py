@@ -34,8 +34,12 @@ class DataTrainingArguments:
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
 
-    dataset_name: Optional[str] = field(
-        default="../data/train_dataset",
+    dataset_train: Optional[str] = field(
+        default="../data/train.csv",
+        metadata={"help": "The name of the dataset to use."},
+    )
+    dataset_test: Optional[str] = field(
+        default="../data/test.csv",
         metadata={"help": "The name of the dataset to use."},
     )
     overwrite_cache: bool = field(
@@ -84,5 +88,11 @@ class DataTrainingArguments:
         default=True,
         metadata={
             "help": "Use batch while tokenization without BERTDataset class from baseline code."
+        },
+    )
+    WANDB_PROJECT: str = field(
+        default="Data-centric",
+        metadata={
+            "help": "Project name for WANDB, must be consistent between experiments to compare results"
         },
     )
