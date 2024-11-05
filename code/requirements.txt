@@ -1,0 +1,12 @@
+transformers
+sentencepiece
+numpy
+pandas
+evaluate
+accelerate
+scikit-learn
+ipywidgets
+wandb
+pre-commit
+git-python
+wandb
