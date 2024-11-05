@@ -7,3 +7,5 @@ accelerate
 scikit-learn
 ipywidgets
 wandb
+pre-commit
+git-python
